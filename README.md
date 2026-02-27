@@ -16,22 +16,30 @@ An enhanced image save node for ComfyUI that extends the built-in `SaveImage` no
 
 ```bash
 cd ComfyUI/custom_nodes
-git clone https://github.com/yourusername/comfyui-chill-nodes.git
+git clone git@github.com:Megachill/ComfyUI-ChillEasyImageSave.git
 ```
 
 ### Method 2: Manual Download
 
 1. Download this repository as a ZIP file
 2. Extract it to `ComfyUI/custom_nodes/`
-3. Rename the folder to `comfyui-chill-nodes`
+3. Rename the folder to `ComfyUI-ChillEasyImageSave`
 
 ### Dependencies
 
 The node requires Pillow >= 9.0.0 (already included with ComfyUI):
 
+**Standard Installation:**
 ```bash
 pip install -r requirements.txt
 ```
+
+**ComfyUI Portable (Windows):**
+For ComfyUI Portable installations, use the embedded Python:
+```bash
+../../../python_embeded/python.exe -m pip install -r requirements.txt
+```
+Run this command from within the `ComfyUI/custom_nodes/ComfyUI-ChillEasyImageSave/` folder.
 
 ## Usage
 
