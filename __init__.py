@@ -1,0 +1,9 @@
+"""
+Chill Nodes - ComfyUI Custom Node Collection
+
+A collection of enhanced utility nodes for ComfyUI.
+"""
+
+from .nodes.chill_image_save_plus import NODE_CLASS_MAPPINGS, NODE_DISPLAY_NAME_MAPPINGS
+
+__all__ = ["NODE_CLASS_MAPPINGS", "NODE_DISPLAY_NAME_MAPPINGS"]
