@@ -19,6 +19,69 @@ class ChillImageSavePlus:
     and optional metadata stripping.
     """
 
+    # Location presets with GPS coordinates (latitude, longitude, altitude in meters)
+    LOCATION_PRESETS = {
+        # Europe
+        "Paris, France": (48.8566, 2.3522, 35),
+        "London, UK": (51.5074, -0.1278, 11),
+        "Berlin, Germany": (52.5200, 13.4050, 34),
+        "Rome, Italy": (41.9028, 12.4964, 37),
+        "Barcelona, Spain": (41.3851, 2.1734, 12),
+        "Amsterdam, Netherlands": (52.3676, 4.9041, -2),
+        "Vienna, Austria": (48.2082, 16.3738, 151),
+        "Prague, Czech Republic": (50.0755, 14.4378, 177),
+        "Athens, Greece": (37.9838, 23.7275, 70),
+        "Stockholm, Sweden": (59.3293, 18.0686, 15),
+        "Oslo, Norway": (59.9139, 10.7522, 7),
+
+        # USA
+        "New York City, USA": (40.7128, -74.0060, 10),
+        "Los Angeles, USA": (34.0522, -118.2437, 89),
+        "Chicago, USA": (41.8781, -87.6298, 181),
+        "San Francisco, USA": (37.7749, -122.4194, 16),
+        "Miami, USA": (25.7617, -80.1918, 2),
+        "Las Vegas, USA": (36.1699, -115.1398, 610),
+        "Seattle, USA": (47.6062, -122.3321, 56),
+        "Denver, USA": (39.7392, -104.9903, 1609),
+
+        # Canada
+        "Toronto, Canada": (43.6532, -79.3832, 76),
+        "Vancouver, Canada": (49.2827, -123.1207, 70),
+        "Montreal, Canada": (45.5017, -73.5673, 35),
+        "Calgary, Canada": (51.0447, -114.0719, 1045),
+
+        # Russia
+        "Moscow, Russia": (55.7558, 37.6173, 156),
+        "St. Petersburg, Russia": (59.9311, 30.3609, 4),
+
+        # Asia
+        "Tokyo, Japan": (35.6762, 139.6503, 40),
+        "Beijing, China": (39.9042, 116.4074, 44),
+        "Singapore": (1.3521, 103.8198, 15),
+        "Bangkok, Thailand": (13.7563, 100.5018, 4),
+        "Seoul, South Korea": (37.5665, 126.9780, 38),
+        "Mumbai, India": (19.0760, 72.8777, 14),
+        "Dubai, UAE": (25.2048, 55.2708, 5),
+        "Hong Kong": (22.3193, 114.1694, 7),
+
+        # Latin America
+        "Mexico City, Mexico": (19.4326, -99.1332, 2240),
+        "Rio de Janeiro, Brazil": (-22.9068, -43.1729, 2),
+        "Sao Paulo, Brazil": (-23.5505, -46.6333, 760),
+        "Buenos Aires, Argentina": (-34.6037, -58.3816, 25),
+        "Lima, Peru": (-12.0464, -77.0428, 154),
+        "Bogota, Colombia": (4.7110, -74.0721, 2556),
+        "Santiago, Chile": (-33.4489, -70.6693, 521),
+        "Cusco, Peru": (-13.1631, -72.5450, 3399),
+
+        # Oceania
+        "Sydney, Australia": (-33.8688, 151.2093, 3),
+        "Melbourne, Australia": (-37.8136, 144.9631, 31),
+
+        # Manual entry option
+        "Manual (use custom coords)": None,
+    }
+
     RETURN_TYPES = ()
     RETURN_NAMES = ()
     FUNCTION = "save_images"
@@ -27,6 +90,9 @@ class ChillImageSavePlus:
 
     @classmethod
     def INPUT_TYPES(cls):
+        # Get sorted location preset keys
+        preset_keys = sorted([k for k in cls.LOCATION_PRESETS.keys()])
+
         return {
             "required": {
                 "images": ("IMAGE",),
@@ -34,6 +100,11 @@ class ChillImageSavePlus:
                 "format": (["png", "jpg", "webp", "tiff", "bmp"], {"default": "png"}),
                 "quality": ("INT", {"default": 95, "min": 1, "max": 100, "step": 1}),
                 "strip_metadata": ("BOOLEAN", {"default": False}),
+                "gps_enabled": ("BOOLEAN", {"default": False}),
+                "gps_location_preset": (preset_keys, {"default": "Manual (use custom coords)"}),
+                "gps_latitude": ("FLOAT", {"default": 0.0, "min": -90.0, "max": 90.0, "step": 0.000001}),
+                "gps_longitude": ("FLOAT", {"default": 0.0, "min": -180.0, "max": 180.0, "step": 0.000001}),
+                "gps_altitude": ("FLOAT", {"default": 0.0, "min": -1000.0, "max": 10000.0, "step": 0.1}),
             },
             "hidden": {
                 "prompt": "PROMPT",
@@ -45,7 +116,7 @@ class ChillImageSavePlus:
         self.output_dir = folder_paths.get_output_directory()
         self.type = "output"
 
-    def save_images(self, images, filename_prefix, format, quality, strip_metadata, prompt=None, extra_pnginfo=None):
+    def save_images(self, images, filename_prefix, format, quality, strip_metadata, gps_enabled=False, gps_location_preset="Manual (use custom coords)", gps_latitude=0.0, gps_longitude=0.0, gps_altitude=0.0, prompt=None, extra_pnginfo=None):
         """
         Save images in the specified format with quality control and optional metadata.
 
@@ -63,6 +134,12 @@ class ChillImageSavePlus:
         """
         # Clamp quality to valid range
         quality = max(1, min(100, quality))
+
+        # Resolve GPS coordinates from preset if selected
+        if gps_enabled and gps_location_preset != "Manual (use custom coords)":
+            preset_coords = self.LOCATION_PRESETS.get(gps_location_preset)
+            if preset_coords:
+                gps_latitude, gps_longitude, gps_altitude = preset_coords
 
         # Map format strings to PIL format names
         format_mapping = {
@@ -146,7 +223,7 @@ class ChillImageSavePlus:
 
                 elif pil_format == "JPEG":
                     # Embed metadata in EXIF
-                    exif_dict = self._create_exif_metadata(prompt, extra_pnginfo)
+                    exif_dict = self._create_exif_metadata(prompt, extra_pnginfo, gps_enabled, gps_latitude, gps_longitude, gps_altitude)
                     if exif_dict:
                         img.save(file_path, format=pil_format, exif=exif_dict, **save_kwargs)
                         print(f"ChillImageSavePlus: Saved {file_path} (format={format}, quality={quality})")
@@ -159,7 +236,7 @@ class ChillImageSavePlus:
 
                 elif pil_format == "WEBP":
                     # WebP supports EXIF metadata
-                    exif_dict = self._create_exif_metadata(prompt, extra_pnginfo)
+                    exif_dict = self._create_exif_metadata(prompt, extra_pnginfo, gps_enabled, gps_latitude, gps_longitude, gps_altitude)
                     if exif_dict:
                         save_kwargs["exif"] = exif_dict
 
@@ -192,13 +269,85 @@ class ChillImageSavePlus:
 
         return {"ui": {"images": results}}
 
-    def _create_exif_metadata(self, prompt, extra_pnginfo):
+    def _decimal_to_dms(self, decimal_degrees):
+        """
+        Convert decimal degrees to EXIF DMS (degrees, minutes, seconds) format.
+
+        Args:
+            decimal_degrees: Decimal degrees value
+
+        Returns:
+            Tuple of 3 rationals: (degrees, minutes, seconds)
+        """
+        # Get absolute value for calculation
+        abs_value = abs(decimal_degrees)
+
+        # Extract degrees
+        degrees = int(abs_value)
+
+        # Extract minutes
+        minutes_float = (abs_value - degrees) * 60
+        minutes = int(minutes_float)
+
+        # Extract seconds (with 2 decimal places precision)
+        seconds = (minutes_float - minutes) * 60
+        seconds_rational = (int(seconds * 100), 100)
+
+        return ((degrees, 1), (minutes, 1), seconds_rational)
+
+    def _add_gps_to_exif(self, exif, latitude, longitude, altitude):
+        """
+        Add GPS metadata to EXIF dictionary.
+
+        Args:
+            exif: PIL Image.Exif object
+            latitude: Decimal latitude (-90 to 90)
+            longitude: Decimal longitude (-180 to 180)
+            altitude: Altitude in meters
+        """
+        # GPSVersionID (0x0000) - 4 bytes: (2, 2, 0, 0)
+        exif[0x8825] = {0x0000: (2, 2, 0, 0)}
+
+        # Create GPS info dict
+        gps_info = {}
+
+        # GPSVersionID (0x0000) - 4 bytes: (2, 2, 0, 0)
+        gps_info[0x0000] = (2, 2, 0, 0)
+
+        # GPSLatitudeRef (0x0001) - "N" or "S"
+        gps_info[0x0001] = "N" if latitude >= 0 else "S"
+
+        # GPSLatitude (0x0002) - 3 rationals (deg, min, sec)
+        gps_info[0x0002] = self._decimal_to_dms(latitude)
+
+        # GPSLongitudeRef (0x0003) - "E" or "W"
+        gps_info[0x0003] = "E" if longitude >= 0 else "W"
+
+        # GPSLongitude (0x0004) - 3 rationals (deg, min, sec)
+        gps_info[0x0004] = self._decimal_to_dms(longitude)
+
+        # GPSAltitudeRef (0x0005) - 0 = above sea level, 1 = below
+        gps_info[0x0005] = 0 if altitude >= 0 else 1
+
+        # GPSAltitude (0x0006) - rational (absolute value)
+        abs_altitude = abs(altitude)
+        # Use 1 decimal place precision for altitude
+        gps_info[0x0006] = (int(abs_altitude * 10), 10)
+
+        # Add GPS info to EXIF using the GPSInfo tag (0x8825)
+        exif[0x8825] = gps_info
+
+    def _create_exif_metadata(self, prompt, extra_pnginfo, gps_enabled=False, gps_latitude=0.0, gps_longitude=0.0, gps_altitude=0.0):
         """
         Create EXIF metadata dictionary for JPEG/WebP formats.
 
         Args:
             prompt: Workflow prompt
             extra_pnginfo: Additional metadata
+            gps_enabled: Whether to include GPS metadata
+            gps_latitude: GPS latitude (-90 to 90)
+            gps_longitude: GPS longitude (-180 to 180)
+            gps_altitude: GPS altitude in meters
 
         Returns:
             EXIF bytes or None
@@ -214,12 +363,12 @@ class ChillImageSavePlus:
             if extra_pnginfo is not None:
                 metadata_dict.update(extra_pnginfo)
 
+            # Create EXIF bytes using PIL's Exif class
+            exif = Image.Exif()
+
             if metadata_dict:
                 # Convert metadata to JSON string
                 metadata_json = json.dumps(metadata_dict, separators=(',', ':'))
-
-                # Create EXIF bytes using PIL's Exif class
-                exif = Image.Exif()
 
                 # Add UserComment tag (0x9286 = 37510)
                 # UserComment format: first 8 bytes are charset identifier
@@ -228,13 +377,17 @@ class ChillImageSavePlus:
                 user_comment = charset + metadata_json.encode('ascii')
                 exif[0x9286] = user_comment
 
-                # Add ImageDescription (0x010E = 270)
-                exif[0x010E] = "ComfyUI Workflow"
+            # Add ImageDescription (0x010E = 270)
+            exif[0x010E] = "ComfyUI Workflow"
 
-                # Add Software tag (0x0131 = 305)
-                exif[0x0131] = "ComfyUI - ChillImageSavePlus"
+            # Add Software tag (0x0131 = 305)
+            exif[0x0131] = "ComfyUI - ChillImageSavePlus"
 
-                return exif.tobytes()
+            # Add GPS metadata if enabled
+            if gps_enabled:
+                self._add_gps_to_exif(exif, gps_latitude, gps_longitude, gps_altitude)
+
+            return exif.tobytes()
 
         except Exception as e:
             print(f"ChillImageSavePlus: Warning - could not create EXIF metadata: {e}")
