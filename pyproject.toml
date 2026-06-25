@@ -1,0 +1,21 @@
+[project]
+name = "chilleasyimagesave"
+description = "Enhanced image save node with PNG/JPEG/WebP/TIFF/BMP support, quality control, GPS EXIF metadata, and date macro expansion in filename prefix."
+version = "1.0.2"
+license = "MIT"
+classifiers = [
+    "Operating System :: OS Independent",
+]
+
+dependencies = ["Pillow>=9.0.0"]
+
+[project.urls]
+Repository = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave"
+Documentation = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave/wiki"
+"Bug Tracker" = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave/issues"
+
+[tool.comfy]
+PublisherId = ""
+DisplayName = "ComfyUI Chill Easy Image Save"
+Icon = ""
+includes = []
