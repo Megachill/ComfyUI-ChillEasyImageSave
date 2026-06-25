@@ -316,6 +316,15 @@ class ChillImageSavePlus:
                 print(
                     f"ChillImageSavePlus: Saved {file_path} (format={format}, quality={quality if supports_quality else 'N/A'})"
                 )
+            except ValueError as e:
+                if "EXIF data is too long" in str(e) and "exif" in save_kwargs:
+                    # Workflow JSON too large for JPEG EXIF limit (65535 bytes); save without EXIF
+                    print(f"ChillImageSavePlus: EXIF too large, saving {file_path} without embedded metadata")
+                    fallback_kwargs = {k: v for k, v in save_kwargs.items() if k != "exif"}
+                    img.save(file_path, format=pil_format, **fallback_kwargs)
+                else:
+                    print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
+                    raise
             except Exception as e:
                 print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
                 raise
