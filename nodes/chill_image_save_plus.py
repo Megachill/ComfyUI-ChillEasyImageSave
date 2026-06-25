@@ -4,12 +4,42 @@ Supports multiple formats (PNG, JPEG, WebP, TIFF, BMP) with quality control and 
 """
 
 import os
+import re
 import json
 import numpy as np
+from datetime import datetime
 from PIL import Image, PngImagePlugin, TiffImagePlugin
 
 import folder_paths
 import comfy.utils
+
+
+def _expand_date_macros(prefix):
+    """Expand %date:FORMAT% and %time:FORMAT% macros in filename prefix.
+
+    Supports Java SimpleDateFormat tokens: yyyy yy MM dd HH hh mm ss SSS
+    """
+    now = datetime.now()
+
+    def _java_fmt_to_strftime(fmt):
+        # Order matters: longer tokens first to avoid partial replacement
+        fmt = fmt.replace("yyyy", "%Y")
+        fmt = fmt.replace("yy", "%y")
+        fmt = fmt.replace("MM", "%m")
+        fmt = fmt.replace("dd", "%d")
+        fmt = fmt.replace("HH", "%H")
+        fmt = fmt.replace("hh", "%I")
+        fmt = fmt.replace("mm", "%M")
+        fmt = fmt.replace("ss", "%S")
+        fmt = fmt.replace("SSS", "%f")
+        return fmt
+
+    def _replace(match):
+        return now.strftime(_java_fmt_to_strftime(match.group(1)))
+
+    prefix = re.sub(r'%date:([^%]+)%', _replace, prefix)
+    prefix = re.sub(r'%time:([^%]+)%', _replace, prefix)
+    return prefix
 
 
 class ChillImageSavePlus:
@@ -150,6 +180,9 @@ class ChillImageSavePlus:
         Returns:
             Dict with UI update information
         """
+        # Expand date/time macros (e.g. %date:yyyy-MM-dd%) in filename prefix
+        filename_prefix = _expand_date_macros(filename_prefix)
+
         # Clamp quality to valid range
         quality = max(1, min(100, quality))
 
