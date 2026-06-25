@@ -15,7 +15,7 @@ Documentation = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave/wiki"
 "Bug Tracker" = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave/issues"
 
 [tool.comfy]
-PublisherId = ""
+PublisherId = "megachill"
 DisplayName = "ComfyUI Chill Easy Image Save"
 Icon = ""
 includes = []
