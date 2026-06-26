@@ -9,6 +9,7 @@ import json
 import numpy as np
 from datetime import datetime
 from PIL import Image, PngImagePlugin, TiffImagePlugin
+import piexif
 
 import folder_paths
 import comfy.utils
@@ -316,15 +317,9 @@ class ChillImageSavePlus:
                 print(
                     f"ChillImageSavePlus: Saved {file_path} (format={format}, quality={quality if supports_quality else 'N/A'})"
                 )
-            except ValueError as e:
-                if "EXIF data is too long" in str(e) and "exif" in save_kwargs:
-                    # Workflow JSON too large for JPEG EXIF limit (65535 bytes); save without EXIF
-                    print(f"ChillImageSavePlus: EXIF too large, saving {file_path} without embedded metadata")
-                    fallback_kwargs = {k: v for k, v in save_kwargs.items() if k != "exif"}
-                    img.save(file_path, format=pil_format, **fallback_kwargs)
-                else:
-                    print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
-                    raise
+            except Exception as e:
+                print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
+                raise
             except Exception as e:
                 print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
                 raise
@@ -361,51 +356,6 @@ class ChillImageSavePlus:
 
         return ((degrees, 1), (minutes, 1), seconds_rational)
 
-    def _add_gps_to_exif(self, exif, latitude, longitude, altitude):
-        """
-        Add GPS metadata to EXIF dictionary.
-
-        Args:
-            exif: PIL Image.Exif object
-            latitude: Decimal latitude (-90 to 90)
-            longitude: Decimal longitude (-180 to 180)
-            altitude: Altitude in meters
-        """
-        # Validate GPS coordinates
-        if not (-90 <= latitude <= 90):
-            raise ValueError(f"Latitude {latitude} out of range [-90, 90]")
-        if not (-180 <= longitude <= 180):
-            raise ValueError(f"Longitude {longitude} out of range [-180, 180]")
-
-        # Create GPS info dict
-        gps_info = {}
-
-        # GPSVersionID (0x0000) - 4 bytes: (2, 2, 0, 0)
-        gps_info[0x0000] = (2, 2, 0, 0)
-
-        # GPSLatitudeRef (0x0001) - "N" or "S"
-        gps_info[0x0001] = "N" if latitude >= 0 else "S"
-
-        # GPSLatitude (0x0002) - 3 rationals (deg, min, sec)
-        gps_info[0x0002] = self._decimal_to_dms(latitude)
-
-        # GPSLongitudeRef (0x0003) - "E" or "W"
-        gps_info[0x0003] = "E" if longitude >= 0 else "W"
-
-        # GPSLongitude (0x0004) - 3 rationals (deg, min, sec)
-        gps_info[0x0004] = self._decimal_to_dms(longitude)
-
-        # GPSAltitudeRef (0x0005) - 0 = above sea level, 1 = below
-        gps_info[0x0005] = 0 if altitude >= 0 else 1
-
-        # GPSAltitude (0x0006) - rational (absolute value)
-        abs_altitude = abs(altitude)
-        # Use 1 decimal place precision for altitude
-        gps_info[0x0006] = (int(abs_altitude * 10), 10)
-
-        # Add GPS info to EXIF using the GPSInfo tag (0x8825)
-        exif[0x8825] = gps_info
-
     def _create_exif_metadata(
         self,
         prompt,
@@ -415,61 +365,58 @@ class ChillImageSavePlus:
         gps_longitude=0.0,
         gps_altitude=0.0,
     ):
-        """
-        Create EXIF metadata dictionary for JPEG/WebP formats.
+        """Create EXIF bytes for JPEG/WebP using piexif.
 
-        Args:
-            prompt: Workflow prompt
-            extra_pnginfo: Additional metadata
-            gps_enabled: Whether to include GPS metadata
-            gps_latitude: GPS latitude (-90 to 90)
-            gps_longitude: GPS longitude (-180 to 180)
-            gps_altitude: GPS altitude in meters
-
-        Returns:
-            EXIF bytes or None
+        Workflow JSON is embedded in UserComment. If the JSON pushes the EXIF
+        over JPEG's 65535-byte APP1 limit, workflow is dropped but GPS and
+        basic tags are kept.
         """
         try:
-            # Create a minimal EXIF structure
-            # UserComment tag (37510) is commonly used for embedding workflow data
-            exif_dict = {}
+            zeroth_ifd = {
+                piexif.ImageIFD.ImageDescription: b"ComfyUI Workflow",
+                piexif.ImageIFD.Software: b"ComfyUI - ChillImageSavePlus",
+            }
+            exif_ifd = {}
+            gps_ifd = {}
 
+            # Workflow JSON → UserComment
             metadata_dict = {}
             if prompt is not None:
                 metadata_dict["prompt"] = prompt
             if extra_pnginfo is not None:
                 metadata_dict.update(extra_pnginfo)
-
-            # Create EXIF bytes using PIL's Exif class
-            exif = Image.Exif()
-
             if metadata_dict:
-                # Convert metadata to JSON string
-                metadata_json = json.dumps(metadata_dict, separators=(",", ":"))
+                json_bytes = json.dumps(metadata_dict, separators=(",", ":")).encode("ascii", errors="replace")
+                exif_ifd[piexif.ExifIFD.UserComment] = b"ASCII\x00\x00\x00" + json_bytes
 
-                # Add UserComment tag (0x9286 = 37510)
-                # UserComment format: first 8 bytes are charset identifier
-                # "ASCII\x00\x00\x00" for ASCII encoding
-                charset = b"ASCII\x00\x00\x00"
-                user_comment = charset + metadata_json.encode("ascii")
-                exif[0x9286] = user_comment
-
-            # Add ImageDescription (0x010E = 270)
-            exif[0x010E] = "ComfyUI Workflow"
-
-            # Add Software tag (0x0131 = 305)
-            exif[0x0131] = "ComfyUI - ChillImageSavePlus"
-
-            # Add GPS metadata if enabled
+            # GPS
             if gps_enabled:
-                self._add_gps_to_exif(exif, gps_latitude, gps_longitude, gps_altitude)
+                if not (-90 <= gps_latitude <= 90):
+                    raise ValueError(f"Latitude {gps_latitude} out of range [-90, 90]")
+                if not (-180 <= gps_longitude <= 180):
+                    raise ValueError(f"Longitude {gps_longitude} out of range [-180, 180]")
+                gps_ifd = {
+                    piexif.GPSIFD.GPSVersionID: b"\x02\x02\x00\x00",
+                    piexif.GPSIFD.GPSLatitudeRef: b"N" if gps_latitude >= 0 else b"S",
+                    piexif.GPSIFD.GPSLatitude: self._decimal_to_dms(gps_latitude),
+                    piexif.GPSIFD.GPSLongitudeRef: b"E" if gps_longitude >= 0 else b"W",
+                    piexif.GPSIFD.GPSLongitude: self._decimal_to_dms(gps_longitude),
+                    piexif.GPSIFD.GPSAltitudeRef: b"\x00" if gps_altitude >= 0 else b"\x01",
+                    piexif.GPSIFD.GPSAltitude: (int(abs(gps_altitude) * 10), 10),
+                }
 
-            return exif.tobytes()
+            exif_bytes = piexif.dump({"0th": zeroth_ifd, "Exif": exif_ifd, "GPS": gps_ifd, "1st": {}})
+
+            # JPEG APP1 hard limit is 65535 bytes — drop workflow JSON if over
+            if len(exif_bytes) > 65500 and exif_ifd:
+                print("ChillImageSavePlus: EXIF too large, dropping workflow JSON but keeping GPS")
+                exif_bytes = piexif.dump({"0th": zeroth_ifd, "Exif": {}, "GPS": gps_ifd, "1st": {}})
+
+            return exif_bytes
 
         except Exception as e:
             print(f"ChillImageSavePlus: Warning - could not create EXIF metadata: {e}")
-
-        return None
+            return None
 
     def _create_tiff_metadata(
         self,

@@ -1,13 +1,13 @@
 [project]
 name = "chilleasyimagesave"
 description = "Enhanced image save node with PNG/JPEG/WebP/TIFF/BMP support, quality control, GPS EXIF metadata, and date macro expansion in filename prefix."
-version = "1.0.2"
+version = "1.0.3"
 license = "MIT"
 classifiers = [
     "Operating System :: OS Independent",
 ]
 
-dependencies = ["Pillow>=9.0.0"]
+dependencies = ["Pillow>=9.0.0", "piexif>=1.1.3"]
 
 [project.urls]
 Repository = "https://github.com/Megachill/ComfyUI-ChillEasyImageSave"
