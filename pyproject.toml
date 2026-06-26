@@ -1,7 +1,7 @@
 [project]
 name = "chilleasyimagesave"
 description = "Enhanced image save node with PNG/JPEG/WebP/TIFF/BMP support, quality control, GPS EXIF metadata, and date macro expansion in filename prefix."
-version = "1.0.3"
+version = "1.0.4"
 license = "MIT"
 classifiers = [
     "Operating System :: OS Independent",

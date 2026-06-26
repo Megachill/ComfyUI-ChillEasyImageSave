@@ -9,7 +9,12 @@ import json
 import numpy as np
 from datetime import datetime
 from PIL import Image, PngImagePlugin, TiffImagePlugin
-import piexif
+try:
+    import piexif
+    _PIEXIF_AVAILABLE = True
+except ImportError:
+    _PIEXIF_AVAILABLE = False
+    print("ChillImageSavePlus: piexif not installed — GPS EXIF for JPEG/WebP unavailable. Fix: pip install piexif")
 
 import folder_paths
 import comfy.utils
@@ -262,50 +267,47 @@ class ChillImageSavePlus:
                     save_kwargs["method"] = 6  # Best compression
 
             # Handle metadata
+            jpeg_exif_dict = None  # built below; inserted into file after save
+
             if not strip_metadata:
                 if pil_format == "PNG":
-                    # Use PNG text chunks for metadata
                     metadata = PngImagePlugin.PngInfo()
                     if prompt is not None:
                         metadata.add_text("prompt", json.dumps(prompt))
                     if extra_pnginfo is not None:
                         for key, value in extra_pnginfo.items():
                             metadata.add_text(key, json.dumps(value))
-                    # Add GPS metadata if enabled
                     if gps_enabled:
                         metadata.add_text("GPSLatitude", str(gps_latitude))
                         metadata.add_text("GPSLongitude", str(gps_longitude))
                         metadata.add_text("GPSAltitude", str(gps_altitude))
                     save_kwargs["pnginfo"] = metadata
 
-                elif pil_format in ("JPEG", "WEBP"):
-                    # JPEG and WebP use EXIF for metadata
+                elif pil_format == "JPEG":
+                    # PIL's exif= kwarg is silently ignored for freshly-created images;
+                    # build the dict now and insert into the file via piexif after saving.
+                    jpeg_exif_dict = self._build_exif_dict(
+                        prompt, extra_pnginfo, gps_enabled,
+                        gps_latitude, gps_longitude, gps_altitude,
+                    )
+
+                elif pil_format == "WEBP":
                     exif_bytes = self._create_exif_metadata(
-                        prompt,
-                        extra_pnginfo,
-                        gps_enabled,
-                        gps_latitude,
-                        gps_longitude,
-                        gps_altitude,
+                        prompt, extra_pnginfo, gps_enabled,
+                        gps_latitude, gps_longitude, gps_altitude,
                     )
                     if exif_bytes:
                         save_kwargs["exif"] = exif_bytes
 
                 elif pil_format == "TIFF":
-                    # TIFF supports metadata via tags
                     tiffinfo = self._create_tiff_metadata(
-                        prompt,
-                        extra_pnginfo,
-                        gps_enabled,
-                        gps_latitude,
-                        gps_longitude,
-                        gps_altitude,
+                        prompt, extra_pnginfo, gps_enabled,
+                        gps_latitude, gps_longitude, gps_altitude,
                     )
                     if tiffinfo:
                         save_kwargs["tiffinfo"] = tiffinfo
 
             else:
-                # Strip metadata by creating fresh image from raw pixels
                 if img.mode in ("RGB", "RGBA", "L"):
                     img = Image.fromarray(np.array(img))
                 else:
@@ -314,15 +316,24 @@ class ChillImageSavePlus:
             # Save the image
             try:
                 img.save(file_path, format=pil_format, **save_kwargs)
-                print(
-                    f"ChillImageSavePlus: Saved {file_path} (format={format}, quality={quality if supports_quality else 'N/A'})"
-                )
             except Exception as e:
                 print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
                 raise
-            except Exception as e:
-                print(f"ChillImageSavePlus: Error saving {file_path}: {e}")
-                raise
+
+            # Post-save: inject EXIF into JPEG using piexif.insert()
+            # (more reliable than PIL's exif= kwarg for new images)
+            if jpeg_exif_dict is not None and _PIEXIF_AVAILABLE:
+                try:
+                    exif_bytes = piexif.dump(jpeg_exif_dict)
+                    if len(exif_bytes) > 65500:
+                        print("ChillImageSavePlus: EXIF too large, dropping workflow JSON but keeping GPS")
+                        jpeg_exif_dict["Exif"] = {}
+                        exif_bytes = piexif.dump(jpeg_exif_dict)
+                    piexif.insert(exif_bytes, file_path)
+                except Exception as e:
+                    print(f"ChillImageSavePlus: Warning - could not insert JPEG EXIF: {e}")
+
+            print(f"ChillImageSavePlus: Saved {file_path} (format={format}, quality={quality if supports_quality else 'N/A'})")
 
             results.append(
                 {"filename": file_name, "subfolder": subfolder, "type": self.type}
@@ -356,7 +367,7 @@ class ChillImageSavePlus:
 
         return ((degrees, 1), (minutes, 1), seconds_rational)
 
-    def _create_exif_metadata(
+    def _build_exif_dict(
         self,
         prompt,
         extra_pnginfo,
@@ -365,12 +376,9 @@ class ChillImageSavePlus:
         gps_longitude=0.0,
         gps_altitude=0.0,
     ):
-        """Create EXIF bytes for JPEG/WebP using piexif.
-
-        Workflow JSON is embedded in UserComment. If the JSON pushes the EXIF
-        over JPEG's 65535-byte APP1 limit, workflow is dropped but GPS and
-        basic tags are kept.
-        """
+        """Return a piexif-compatible EXIF dict, or None if piexif unavailable."""
+        if not _PIEXIF_AVAILABLE:
+            return None
         try:
             zeroth_ifd = {
                 piexif.ImageIFD.ImageDescription: b"ComfyUI Workflow",
@@ -379,7 +387,6 @@ class ChillImageSavePlus:
             exif_ifd = {}
             gps_ifd = {}
 
-            # Workflow JSON → UserComment
             metadata_dict = {}
             if prompt is not None:
                 metadata_dict["prompt"] = prompt
@@ -389,7 +396,6 @@ class ChillImageSavePlus:
                 json_bytes = json.dumps(metadata_dict, separators=(",", ":")).encode("ascii", errors="replace")
                 exif_ifd[piexif.ExifIFD.UserComment] = b"ASCII\x00\x00\x00" + json_bytes
 
-            # GPS
             if gps_enabled:
                 if not (-90 <= gps_latitude <= 90):
                     raise ValueError(f"Latitude {gps_latitude} out of range [-90, 90]")
@@ -405,15 +411,32 @@ class ChillImageSavePlus:
                     piexif.GPSIFD.GPSAltitude: (int(abs(gps_altitude) * 10), 10),
                 }
 
-            exif_bytes = piexif.dump({"0th": zeroth_ifd, "Exif": exif_ifd, "GPS": gps_ifd, "1st": {}})
+            return {"0th": zeroth_ifd, "Exif": exif_ifd, "GPS": gps_ifd, "1st": {}}
 
-            # JPEG APP1 hard limit is 65535 bytes — drop workflow JSON if over
-            if len(exif_bytes) > 65500 and exif_ifd:
+        except Exception as e:
+            print(f"ChillImageSavePlus: Warning - could not build EXIF dict: {e}")
+            return None
+
+    def _create_exif_metadata(
+        self,
+        prompt,
+        extra_pnginfo,
+        gps_enabled=False,
+        gps_latitude=0.0,
+        gps_longitude=0.0,
+        gps_altitude=0.0,
+    ):
+        """Return piexif EXIF bytes for WebP (JPEG uses _build_exif_dict + piexif.insert instead)."""
+        exif_dict = self._build_exif_dict(prompt, extra_pnginfo, gps_enabled, gps_latitude, gps_longitude, gps_altitude)
+        if exif_dict is None:
+            return None
+        try:
+            exif_bytes = piexif.dump(exif_dict)
+            if len(exif_bytes) > 65500 and exif_dict["Exif"]:
                 print("ChillImageSavePlus: EXIF too large, dropping workflow JSON but keeping GPS")
-                exif_bytes = piexif.dump({"0th": zeroth_ifd, "Exif": {}, "GPS": gps_ifd, "1st": {}})
-
+                exif_dict["Exif"] = {}
+                exif_bytes = piexif.dump(exif_dict)
             return exif_bytes
-
         except Exception as e:
             print(f"ChillImageSavePlus: Warning - could not create EXIF metadata: {e}")
             return None
