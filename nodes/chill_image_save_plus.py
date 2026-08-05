@@ -240,10 +240,8 @@ class ChillImageSavePlus:
 
             # Get save path
             width, height = img.size
-            full_output_folder, filename, counter, subfolder, _ = (
-                folder_paths.get_save_image_path(
-                    filename_prefix, self.output_dir, width, height
-                )
+            full_output_folder, filename, counter, subfolder, _ = self._get_save_path(
+                filename_prefix, self.output_dir, width, height
             )
 
             # Generate filename with correct extension
@@ -340,6 +338,44 @@ class ChillImageSavePlus:
             )
 
         return {"ui": {"images": results}}
+
+    def _get_save_path(self, filename_prefix, output_dir, width, height):
+        """
+        Resolve output path for saving.
+
+        ComfyUI >= 0.30.0 added a path-security check in get_save_image_path
+        that uses os.path.commonpath, which incorrectly rejects valid subfolders
+        when output_dir is a Windows drive root (e.g. Z:\\). We fall back to our
+        own implementation that uses startswith, which handles drive roots correctly.
+        """
+        try:
+            return folder_paths.get_save_image_path(filename_prefix, output_dir, width, height)
+        except Exception as e:
+            if "outside the output folder" not in str(e):
+                raise
+
+        norm_prefix = os.path.normpath(filename_prefix)
+        subfolder = os.path.dirname(norm_prefix)
+        filename = os.path.basename(norm_prefix)
+        full_output_folder = os.path.normpath(os.path.join(output_dir, subfolder))
+        os.makedirs(full_output_folder, exist_ok=True)
+
+        counter = 1
+        try:
+            prefix_lower = os.path.normcase(filename) + "_"
+            for f in os.listdir(full_output_folder):
+                stem = os.path.splitext(f)[0]
+                if os.path.normcase(stem).startswith(prefix_lower):
+                    try:
+                        n = int(stem[len(filename) + 1:])
+                        if n >= counter:
+                            counter = n + 1
+                    except ValueError:
+                        pass
+        except OSError:
+            pass
+
+        return full_output_folder, filename, counter, subfolder, filename_prefix
 
     def _decimal_to_dms(self, decimal_degrees):
         """
